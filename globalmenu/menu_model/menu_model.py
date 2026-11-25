@@ -343,9 +343,12 @@ class DbusAppMenu(object):
 		bus_path = '/com/canonical/AppMenu/Registrar'
 
 		try:
-			obj        = self.session.get_object(bus_name, bus_path)
-			interface  = dbus.Interface(obj, bus_name)
-			name, path = interface.GetMenuForWindow(self.window.get_xid(), timeout=CLIENT_TIMEOUT)
+			name = self.window.get_utf8_prop('_DBUS_APPMENU_SERVICE_NAME')
+			path = self.window.get_utf8_prop('_DBUS_APPMENU_OBJECT_PATH')
+			if not (name and path):
+				obj = self.session.get_object(bus_name, bus_path)
+				interface = dbus.Interface(obj, bus_name)
+				name, path = interface.GetMenuForWindow(self.window.get_xid(), timeout=CLIENT_TIMEOUT)
 			obj        = self.session.get_object(name, path)
 			interface  = dbus.Interface(obj, 'com.canonical.dbusmenu')
 

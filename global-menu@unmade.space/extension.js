@@ -55,6 +55,8 @@ class MenuBar {
 		// drop trees whose request id is stale
 		this._request = 0;
 		this._requestApp = null;
+		this._window = null;
+		this._windowSignalIds = [];
 
 		this._proxy = new DaemonProxy({
 			onMenuTree: (items, request) => {
@@ -109,6 +111,7 @@ class MenuBar {
 
 		const focusApp = this._winTracker.focus_app;
 		const win = focusApp ? this._menuWindow(focusApp) : null;
+		this._trackWindow(win);
 		if (!win) {
 			this._request++;
 			this._fallback?.setBlank(false);
@@ -131,7 +134,7 @@ class MenuBar {
 				`matched ${this._shortcutMapping?.app ?? 'nothing'}`);
 		}
 
-		const appId = focusApp.get_id();
+		const appId = `${focusApp.get_id()}:${win.get_id()}`;
 		const cached = this._cache.get(appId);
 		if (cached) {
 			this.setMenuTree(cached);
@@ -162,10 +165,37 @@ class MenuBar {
 	}
 
 	_disconnectInputs() {
+		this._trackWindow(null);
 		for (const [source, id] of this._shellHandlers)
 			source.disconnect(id);
 		this._shellHandlers = [];
 		this._proxy.destroy();
+	}
+
+	_trackWindow(win) {
+		if (win === this._window)
+			return;
+		for (const id of this._windowSignalIds)
+			this._window.disconnect(id);
+		this._windowSignalIds = [];
+		this._window = win;
+		if (!win)
+			return;
+
+		this._windowSignalIds.push(win.connect('unmanaged', () => {
+			this._trackWindow(null);
+			this._request++;
+			this._showNothing();
+		}));
+		if (typeof win.get_dbus_appmenu_service_name !== 'function')
+			return;
+		for (const prop of ['dbus-appmenu-service-name', 'dbus-appmenu-object-path']) {
+			this._windowSignalIds.push(win.connect(`notify::${prop}`, () => {
+				// Addresses can arrive after focus or change without changing the window.
+				this._cache = new MenuTreeCache();
+				this.refresh();
+			}));
+		}
 	}
 
 	_closeAllMenus() {
@@ -232,6 +262,12 @@ class MenuBar {
 		for (const prop of gtkProps) {
 			if (win[prop] != null)
 				data[prop] = win[prop];
+		}
+		const service = win.get_dbus_appmenu_service_name?.();
+		const path = win.get_dbus_appmenu_object_path?.();
+		if (service && path) {
+			data.dbus_appmenu_service_name = service;
+			data.dbus_appmenu_object_path = path;
 		}
 		const appName = this._winTracker.get_window_app(win)?.get_name();
 		if (appName)
