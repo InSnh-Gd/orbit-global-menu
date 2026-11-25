@@ -209,9 +209,18 @@ export class AppearanceManager {
 
 	applyPopupBackground(btn) {
 		const s = this._settings;
+		const fontSize = s.get_int('menu-font-size');
+
+		if (this._managedByBmsPopup(btn)) {
+			this._clearOwnedBoxStyle(btn);
+			btn.itemsMenu?.box?.set_style?.(fontSize > 0 ? `font-size: ${fontSize}pt;` : null);
+			this._styleWells(btn, this._boxCornerRadius(btn));
+			return;
+		}
+
+		btn.itemsMenu?.box?.set_style?.(null);
 		const radius = s.get_int('popup-corner-radius');
 		const opacity = s.get_int('popup-opacity');
-		const fontSize = s.get_int('menu-font-size');
 
 		let style = `border-radius: ${radius}px;`;
 		if (fontSize > 0)
@@ -223,6 +232,7 @@ export class AppearanceManager {
 			const alpha = (opacity / 100).toFixed(2);
 			style += ` background-color: rgba(${base.red}, ${base.green}, ${base.blue}, ${alpha});`;
 		}
+		btn._globalMenuBoxStyle = style;
 		btn.menu.box.set_style(style);
 		this._styleWells(btn, radius);
 	}
@@ -254,6 +264,11 @@ export class AppearanceManager {
 	}
 
 	applyBlur(btn) {
+		if (this._managedByBmsPopup(btn)) {
+			this._removeBlur(btn, false);
+			return;
+		}
+
 		const s = this._settings;
 		const effects = this._bmsEffects();
 		const wanted = s.get_boolean('blur-popups') && effects !== null;
@@ -366,6 +381,36 @@ export class AppearanceManager {
 		}
 	}
 
+	_managedByBmsPopup(btn) {
+		if (btn.menu?.box?.has_style_class_name?.('bms-popup-blurred'))
+			return true;
+		return Boolean(
+			global.blur_my_shell?._popup?.enabled &&
+			global.blur_my_shell._settings?.popup?.BLUR_MENUS !== false
+		);
+	}
+
+	_clearOwnedBoxStyle(btn) {
+		const owned = btn._globalMenuBoxStyle;
+		if (!owned)
+			return;
+		btn._globalMenuBoxStyle = null;
+		const current = btn.menu?.box?.get_style?.();
+		if (current === owned) {
+			btn.menu.box.set_style(null);
+		} else if (current?.startsWith(owned)) {
+			const rest = current.slice(owned.length).replace(/^[\s;]+/, '');
+			btn.menu.box.set_style(rest || null);
+		}
+	}
+
+	_boxCornerRadius(btn) {
+		const box = btn.menu?.box;
+		if (box?.get_stage?.())
+			return box.get_theme_node().get_border_radius(St.Corner.TOPLEFT) / this._scale();
+		return this._settings.get_int('popup-corner-radius');
+	}
+
 	_bmsEffects() {
 		return global.blur_my_shell?._effects_manager ?? null;
 	}
@@ -384,8 +429,8 @@ export class AppearanceManager {
 		}
 	}
 
-	_removeBlur(btn) {
-		if (btn.menu?.actor)
+	_removeBlur(btn, restoreOffscreen = true) {
+		if (restoreOffscreen && btn._globalMenuBlur && btn.menu?.actor)
 			btn.menu.actor.set_offscreen_redirect(Clutter.OffscreenRedirect.ALWAYS);
 		if (!btn._globalMenuBlur)
 			return;
@@ -402,7 +447,8 @@ export class AppearanceManager {
 		btn.menu.actor.remove_style_class_name('global-menu-no-arrow');
 		btn.menu.actor.remove_style_class_name('global-menu-accels-held');
 		btn.menu.actor.set_style(null);
-		btn.menu.box.set_style(null);
+		this._clearOwnedBoxStyle(btn);
+		btn.itemsMenu?.box?.set_style?.(null);
 		this._eachWell(btn.itemsMenu, null);
 		if (btn._globalMenuDirectionId) {
 			btn.disconnect(btn._globalMenuDirectionId);
